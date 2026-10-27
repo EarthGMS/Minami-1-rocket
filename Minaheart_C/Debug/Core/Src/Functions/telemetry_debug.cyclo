@@ -1,0 +1,2 @@
+../Core/Src/Functions/telemetry_debug.c:8:6:uint32_to_bin_str	5
+../Core/Src/Functions/telemetry_debug.c:20:6:serial_result_display	1

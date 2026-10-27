@@ -1,0 +1,2 @@
+../Core/Src/Functions/telemetry_debug.c:8:6:uint32_to_bin_str	24	static
+../Core/Src/Functions/telemetry_debug.c:20:6:serial_result_display	32	static

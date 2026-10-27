@@ -1,0 +1,5 @@
+../Core/Src/Functions/SD_card.c:8:9:SD_SPI_ReadWrite	40	static
+../Core/Src/Functions/SD_card.c:15:9:SD_SendCmd	112	static
+../Core/Src/Functions/SD_card.c:42:9:SD_Init	104	static
+../Core/Src/Functions/SD_card.c:87:9:SD_ReadSector	120	static
+../Core/Src/Functions/SD_card.c:114:9:SD_WriteSector	128	static

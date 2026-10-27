@@ -1,0 +1,4 @@
+../Core/Src/Functions/pressure_sensor.c:12:8:BMP580_readPressure	2
+../Core/Src/Functions/pressure_sensor.c:23:8:pressure_to_altitude	1
+../Core/Src/Functions/pressure_sensor.c:28:9:bmp580_read_reg	1
+../Core/Src/Functions/pressure_sensor.c:40:6:bmp580_write_reg	1
