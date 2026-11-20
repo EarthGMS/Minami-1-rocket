@@ -7,9 +7,15 @@
 #include <stdbool.h>
 #include "fatfs.h"
 #include <stdarg.h>
+#include "Functions/LoRa_functions.h"
+
+I2C_HandleTypeDef hi2c2;
 
 SPI_HandleTypeDef hspi1;
 SPI_HandleTypeDef hspi2;
+SPI_HandleTypeDef hspi3;
+
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 
@@ -28,143 +34,108 @@ void myprintf(const char *fmt, ...) {
 
 }
 
-// Reads one register from the BMP580 over SPI and returns its value
-/* USER CODE END PV */
-
 char buffer_main[64];
 uint8_t writeBuf[512];
 uint8_t readBuf[512];
+uint8_t message[512];
 
-// Custom log messages
-char msg_init[] = "\r\n=== USART1 SD Card Test Output ===\r\n\n";
-char msg_read_prefix[] = "Read Result: \"";
-char msg_quote_newline[] = "\"\r\n";
 
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_SPI2_Init(void);
+static void MX_I2C2_Init(void);
+static void MX_SPI3_Init(void);
+static void MX_TIM2_Init(void);
 
-bool isLaunched;
 
 int main(void)
 {
-	HAL_Init();
-	SystemClock_Config();
-	MX_GPIO_Init();
-	MX_USART1_UART_Init();
-	MX_SPI1_Init();
-	MX_SPI2_Init();
-	MX_FATFS_Init(); //DO NOT FORGET TO INITIALIZE THE FATFS! OR ELSE IT'LL HANG!
+  myprintf("Minaheart initialization!");
 
-    //BMP setup
-    HAL_Delay(10);                       		// Wait 10 ms to let the sensor finish powering up
-    bmp580_read_reg(0x01, hspi1);               // Dummy read of CHIP_ID: toggles CS low so the sensor locks into SPI mode (result ignored)
-    bmp580_write_reg(0x31, 0x02, &hspi1);		// IIR filter coefficient set to 3 (Balanced response rate vs noise rejection)
-    bmp580_write_reg(0x36, 0x7B, &hspi1); 		// Enable pressure, OSR pressure x128, OSR temperature x8
-    bmp580_write_reg(0x37, 0x03, &hspi1); 		// Run in continuous sampling mode
-    HAL_Delay(10);
+  //Hardware initialization
+  HAL_Init();
+  SystemClock_Config();
+  MX_GPIO_Init();
+  MX_USART1_UART_Init();
+  MX_SPI1_Init();
+  MX_SPI2_Init();
+  MX_FATFS_Init();
+  MX_I2C2_Init();
+  MX_SPI3_Init();
+  MX_TIM2_Init();
 
-    //SD TEST
-    myprintf("\r\n~ SD card demo by kiwih ~\r\n\r\n");
+  //LoRa initialization (wait for test)
+  myprintf("\r\n[LoRa] Starting SPI3\r\n");
+  HAL_GPIO_WritePin(LoRa_CS_GPIO_Port, LoRa_CS_Pin, GPIO_PIN_SET);
+  LoRa_Status status = LoRa_Init();
+  uint8_t version = LoRa_ReadVersion();
+  myprintf("[LoRa] RegVersion=0x%02X, expected 0x12\r\n", (unsigned)version);
 
-      HAL_Delay(1000); //a short delay is important to let the SD card settle
+  if (status != LORA_OK || version != 0x12)
+  {
+    myprintf("[LoRa] Init failed (status=%d)\r\n", (int)status);
+  }
+  uint8_t payload[255];
+  uint8_t length;
+  LoRa_StartReceive();
 
-      //some variables for FatFs
-      FATFS FatFs; 	//Fatfs handle
-      FIL fil; 		//File handle
-      FRESULT fres; //Result after operations
+  //BMI160 initialization
 
-      //Open the file system
-      fres = f_mount(&FatFs, "", 1); //1=mount now
-      if (fres != FR_OK) {
-    	myprintf("f_mount error (%i)\r\n", fres);
-    	while(1);
-      }
 
-      //Let's get some statistics from the SD card
-      DWORD free_clusters, free_sectors, total_sectors;
+  //BMP580 initialization (wait for test)
+  HAL_Delay(10);                       		// Wait 10 ms to let the sensor finish powering up
+  bmp580_read_reg(0x01, hspi1);               // Dummy read of CHIP_ID: toggles CS low so the sensor locks into SPI mode (result ignored)
+  bmp580_write_reg(0x31, 0x02, &hspi1);		// IIR filter coefficient set to 3 (Balanced response rate vs noise rejection)
+  bmp580_write_reg(0x36, 0x7B, &hspi1); 		// Enable pressure, OSR pressure x128, OSR temperature x8
+  bmp580_write_reg(0x37, 0x03, &hspi1); 		// Run in continuous sampling mode
+  HAL_Delay(10);
+  double initialPressure = BMP580_readPressure(hspi1); //Setup the start pressure for starting altitude
 
-      FATFS* getFreeFs;
+  //MicroSD initialization
 
-      fres = f_getfree("", &free_clusters, &getFreeFs);
-      if (fres != FR_OK) {
-    	myprintf("f_getfree error (%i)\r\n", fres);
-    	while(1);
-      }
 
-      //Formula comes from ChaN's documentation
-      total_sectors = (getFreeFs->n_fatent - 2) * getFreeFs->csize;
-      free_sectors = free_clusters * getFreeFs->csize;
-
-      myprintf("SD card stats:\r\n%10lu KiB total drive space.\r\n%10lu KiB available.\r\n", total_sectors / 2, free_sectors / 2);
-
-      //Now let's try to open file "test.txt"
-      fres = f_open(&fil, "test.txt", FA_READ);
-      if (fres != FR_OK) {
-    	myprintf("f_open error (%i)\r\n");
-    	while(1);
-      }
-      myprintf("I was able to open 'test.txt' for reading!\r\n");
-
-      //Read 30 bytes from "test.txt" on the SD card
-      BYTE readBuf[30];
-
-      //We can either use f_read OR f_gets to get data out of files
-      //f_gets is a wrapper on f_read that does some string formatting for us
-      TCHAR* rres = f_gets((TCHAR*)readBuf, 30, &fil);
-      if(rres != 0) {
-    	myprintf("Read string from 'test.txt' contents: %s\r\n", readBuf);
-      } else {
-    	myprintf("f_gets error (%i)\r\n", fres);
-      }
-
-      //Be a tidy kiwi - don't forget to close your file!
-      f_close(&fil);
-
-      //Now let's try and write a file "write.txt"
-      fres = f_open(&fil, "write.txt", FA_WRITE | FA_OPEN_ALWAYS | FA_CREATE_ALWAYS);
-      if(fres == FR_OK) {
-    	myprintf("I was able to open 'write.txt' for writing\r\n");
-      } else {
-    	myprintf("f_open error (%i)\r\n", fres);
-      }
-
-      //Copy in a string
-      strncpy((char*)readBuf, "a new file is made!", 19);
-      UINT bytesWrote;
-      fres = f_write(&fil, readBuf, 19, &bytesWrote);
-      if(fres == FR_OK) {
-    	myprintf("Wrote %i bytes to 'write.txt'!\r\n", bytesWrote);
-      } else {
-    	myprintf("f_write error (%i)\r\n");
-      }
-
-      //Be a tidy kiwi - don't forget to close your file!
-      f_close(&fil);
-
-      //We're done, so de-mount the drive
-      f_mount(NULL, "", 0);
-
-    //Setup the start pressure for starting altitude
-    double initialPressure = BMP580_readPressure(hspi1);
-    //Inital print
-    snprintf(buffer_main, sizeof(buffer_main), "-----------------------SENSOR START!-----------------------\n");
-    HAL_UART_Transmit(&huart1, (uint8_t*)buffer_main, sizeof(buffer_main), 100);
-
+  //Print starting text
+  snprintf(buffer_main, sizeof(buffer_main), "-----------------------MINAHEART FLIGHT COMPUTER-----------------------\n");
+  HAL_UART_Transmit(&huart1, (uint8_t*)buffer_main, sizeof(buffer_main), 100);
 
   while (1)
   {
-	  if ((HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_1) == GPIO_PIN_RESET) && !isLaunched){
-		  isLaunched = 1;
-	  }
+	  //Polling for data from groud station (wait for test)
+	  LoRa_receiveConfigData();
+
+	  //Polling for height (wait for test)
 	  double rawPressure = BMP580_readPressure(hspi1);	// 1. Read the raw pressure
 	  double altitude = pressure_to_altitude(rawPressure, initialPressure); // 2. Calculate raw altitude into altitude
-	  // 3. Apply the dynamic offset to eliminate sensor start-up drift errors
-	  // 4. Flash Logging
-	  serial_result_display(huart1, rawPressure, altitude); // 5. Telemetry Diagnostics
+
+	  //Calculate an angle for rotation (wait for test)
+	  int ang = 1.35*(altitude*100);
+	  int pulse = 1000 + (ang/180)*1000;
+	  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse); //set servos using the same PWM
+
+	  //Send data via LoRa
+	  snprintf((char *)message, sizeof(message), "LoRa test");
+	  LoRa_Send(message, sizeof(message) - 1U, 1000U);
+
+	  //Check if height is less than 0.5 m, enter the landing check
+	  if(altitude > 0.5){
+		  return 0;
+	  }
+
+	  //Check if the landing is all successful or not, if not, mission failure, if yes, mission successful
+	  if(altitude <= 0.5){
+		  if(HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11) && HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12) && HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_14) && HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_15)){
+			  snprintf((char *)message, sizeof(message), "Mission success");
+			  LoRa_Send(message, sizeof(message) - 1U, 1000U);
+		  }
+		  else{
+			  snprintf((char *)message, sizeof(message), "Mission fails");
+			  LoRa_Send(message, sizeof(message) - 1U, 1000U);
+		  }
+	  }
   }
+
 }
 
 /**
@@ -211,6 +182,40 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief I2C2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_I2C2_Init(void)
+{
+
+  /* USER CODE BEGIN I2C2_Init 0 */
+
+  /* USER CODE END I2C2_Init 0 */
+
+  /* USER CODE BEGIN I2C2_Init 1 */
+
+  /* USER CODE END I2C2_Init 1 */
+  hi2c2.Instance = I2C2;
+  hi2c2.Init.ClockSpeed = 100000;
+  hi2c2.Init.DutyCycle = I2C_DUTYCYCLE_2;
+  hi2c2.Init.OwnAddress1 = 0;
+  hi2c2.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
+  hi2c2.Init.DualAddressMode = I2C_DUALADDRESS_DISABLE;
+  hi2c2.Init.OwnAddress2 = 0;
+  hi2c2.Init.GeneralCallMode = I2C_GENERALCALL_DISABLE;
+  hi2c2.Init.NoStretchMode = I2C_NOSTRETCH_DISABLE;
+  if (HAL_I2C_Init(&hi2c2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN I2C2_Init 2 */
+
+  /* USER CODE END I2C2_Init 2 */
+
 }
 
 /**
@@ -290,6 +295,115 @@ static void MX_SPI2_Init(void)
 }
 
 /**
+  * @brief SPI3 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SPI3_Init(void)
+{
+
+  /* USER CODE BEGIN SPI3_Init 0 */
+
+  /* USER CODE END SPI3_Init 0 */
+
+  /* USER CODE BEGIN SPI3_Init 1 */
+
+  /* USER CODE END SPI3_Init 1 */
+  /* SPI3 parameter configuration*/
+  hspi3.Instance = SPI3;
+  hspi3.Init.Mode = SPI_MODE_MASTER;
+  hspi3.Init.Direction = SPI_DIRECTION_2LINES;
+  hspi3.Init.DataSize = SPI_DATASIZE_8BIT;
+  hspi3.Init.CLKPolarity = SPI_POLARITY_LOW;
+  hspi3.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi3.Init.NSS = SPI_NSS_SOFT;
+  hspi3.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+  hspi3.Init.FirstBit = SPI_FIRSTBIT_MSB;
+  hspi3.Init.TIMode = SPI_TIMODE_DISABLE;
+  hspi3.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
+  hspi3.Init.CRCPolynomial = 10;
+  if (HAL_SPI_Init(&hspi3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN SPI3_Init 2 */
+
+  /* USER CODE END SPI3_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 83;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 19999;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 1500;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_3) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  if (HAL_TIM_PWM_ConfigChannel(&htim2, &sConfigOC, TIM_CHANNEL_4) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
+  HAL_TIM_MspPostInit(&htim2);
+
+}
+
+/**
   * @brief USART1 Initialization Function
   * @param None
   * @retval None
@@ -346,13 +460,19 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(BMP580_CS_GPIO_Port, BMP580_CS_Pin, GPIO_PIN_SET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(SD_CS_GPIO_Port, SD_CS_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, LoRa_RESET_Pin|LoRa_CS_Pin|SD_CS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin : PC13 */
   GPIO_InitStruct.Pin = GPIO_PIN_13;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+  HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : LS_1_Pin LS_2_Pin */
+  GPIO_InitStruct.Pin = LS_1_Pin|LS_2_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BMP580_CS_Pin */
@@ -362,12 +482,24 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(BMP580_CS_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pin : SD_CS_Pin */
-  GPIO_InitStruct.Pin = SD_CS_Pin;
+  /*Configure GPIO pins : LoRa_RESET_Pin LoRa_CS_Pin SD_CS_Pin */
+  GPIO_InitStruct.Pin = LoRa_RESET_Pin|LoRa_CS_Pin|SD_CS_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
-  HAL_GPIO_Init(SD_CS_GPIO_Port, &GPIO_InitStruct);
+  HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
+
+  /*Configure GPIO pin : LoRa_DIO0_Pin */
+  GPIO_InitStruct.Pin = LoRa_DIO0_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_IT_RISING;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(LoRa_DIO0_GPIO_Port, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : LS_3_Pin LS_4_Pin */
+  GPIO_InitStruct.Pin = LS_3_Pin|LS_4_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
 

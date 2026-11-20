@@ -65,8 +65,8 @@ all: main-build
 main-build: Minaheart_C.elf secondary-outputs
 
 # Tool invocations
-Minaheart_C.elf Minaheart_C.map: $(OBJS) $(USER_OBJS) D:\CubeIDE\Directory\Minaheart_C\STM32F411CEUX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
-	arm-none-eabi-gcc -o "Minaheart_C.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"D:\CubeIDE\Directory\Minaheart_C\STM32F411CEUX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Minaheart_C.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
+Minaheart_C.elf Minaheart_C.map: $(OBJS) $(USER_OBJS) D:\Github\ repo\Minami-1-rocket\Minaheart_C\STM32F411CEUX_FLASH.ld makefile objects.list $(OPTIONAL_TOOL_DEPS)
+	arm-none-eabi-gcc -o "Minaheart_C.elf" @"objects.list" $(USER_OBJS) $(LIBS) -mcpu=cortex-m4 -T"D:\Github repo\Minami-1-rocket\Minaheart_C\STM32F411CEUX_FLASH.ld" --specs=nosys.specs -Wl,-Map="Minaheart_C.map" -Wl,--gc-sections -static --specs=nano.specs -mfpu=fpv4-sp-d16 -mfloat-abi=hard -mthumb -u _printf_float -Wl,--start-group -lc -lm -Wl,--end-group
 	@echo 'Finished building target: $@'
 	@echo ' '
 

@@ -5,18 +5,21 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
+../Core/Src/Functions/LoRa_functions.c \
 ../Core/Src/Functions/SD_card.c \
 ../Core/Src/Functions/pressure_sensor.c \
 ../Core/Src/Functions/telemetry_debug.c \
 ../Core/Src/Functions/timer.c 
 
 OBJS += \
+./Core/Src/Functions/LoRa_functions.o \
 ./Core/Src/Functions/SD_card.o \
 ./Core/Src/Functions/pressure_sensor.o \
 ./Core/Src/Functions/telemetry_debug.o \
 ./Core/Src/Functions/timer.o 
 
 C_DEPS += \
+./Core/Src/Functions/LoRa_functions.d \
 ./Core/Src/Functions/SD_card.d \
 ./Core/Src/Functions/pressure_sensor.d \
 ./Core/Src/Functions/telemetry_debug.d \
@@ -30,7 +33,7 @@ Core/Src/Functions/%.o Core/Src/Functions/%.su Core/Src/Functions/%.cyclo: ../Co
 clean: clean-Core-2f-Src-2f-Functions
 
 clean-Core-2f-Src-2f-Functions:
-	-$(RM) ./Core/Src/Functions/SD_card.cyclo ./Core/Src/Functions/SD_card.d ./Core/Src/Functions/SD_card.o ./Core/Src/Functions/SD_card.su ./Core/Src/Functions/pressure_sensor.cyclo ./Core/Src/Functions/pressure_sensor.d ./Core/Src/Functions/pressure_sensor.o ./Core/Src/Functions/pressure_sensor.su ./Core/Src/Functions/telemetry_debug.cyclo ./Core/Src/Functions/telemetry_debug.d ./Core/Src/Functions/telemetry_debug.o ./Core/Src/Functions/telemetry_debug.su ./Core/Src/Functions/timer.cyclo ./Core/Src/Functions/timer.d ./Core/Src/Functions/timer.o ./Core/Src/Functions/timer.su
+	-$(RM) ./Core/Src/Functions/LoRa_functions.cyclo ./Core/Src/Functions/LoRa_functions.d ./Core/Src/Functions/LoRa_functions.o ./Core/Src/Functions/LoRa_functions.su ./Core/Src/Functions/SD_card.cyclo ./Core/Src/Functions/SD_card.d ./Core/Src/Functions/SD_card.o ./Core/Src/Functions/SD_card.su ./Core/Src/Functions/pressure_sensor.cyclo ./Core/Src/Functions/pressure_sensor.d ./Core/Src/Functions/pressure_sensor.o ./Core/Src/Functions/pressure_sensor.su ./Core/Src/Functions/telemetry_debug.cyclo ./Core/Src/Functions/telemetry_debug.d ./Core/Src/Functions/telemetry_debug.o ./Core/Src/Functions/telemetry_debug.su ./Core/Src/Functions/timer.cyclo ./Core/Src/Functions/timer.d ./Core/Src/Functions/timer.o ./Core/Src/Functions/timer.su
 
 .PHONY: clean-Core-2f-Src-2f-Functions
 

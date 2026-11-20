@@ -1,0 +1,12 @@
+../Core/Src/Functions/LoRa_functions.c:61:13:cs_low	8	static
+../Core/Src/Functions/LoRa_functions.c:66:13:cs_high	8	static
+../Core/Src/Functions/LoRa_functions.c:71:16:read_reg	32	static
+../Core/Src/Functions/LoRa_functions.c:83:26:write_reg	24	static
+../Core/Src/Functions/LoRa_functions.c:96:26:write_fifo	24	static
+../Core/Src/Functions/LoRa_functions.c:111:26:read_fifo	24	static
+../Core/Src/Functions/LoRa_functions.c:126:9:LoRa_ReadVersion	8	static
+../Core/Src/Functions/LoRa_functions.c:132:13:LoRa_Init	16	static
+../Core/Src/Functions/LoRa_functions.c:204:6:LoRa_StartReceive	8	static
+../Core/Src/Functions/LoRa_functions.c:212:6:LoRa_receiveConfigData	4	static
+../Core/Src/Functions/LoRa_functions.c:216:13:LoRa_Send	32	static
+../Core/Src/Functions/LoRa_functions.c:251:13:LoRa_Receive	32	static
