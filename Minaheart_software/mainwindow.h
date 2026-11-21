@@ -1,89 +1,75 @@
-#pragma once
+#ifndef MAINWINDOW_H
+#define MAINWINDOW_H
+
 #include <QMainWindow>
-#include <QSerialPort>
 #include <QTimer>
 #include <QFile>
-#include <QDateTime>
 #include <QVector>
+#include <QString>
+#include <QByteArray>
 
 class QLabel;
 class QPushButton;
-class QStackedWidget;
 class QTableWidget;
+class QProgressBar;
+class QWidget;
+class QVBoxLayout;
+class QStackedWidget;
 class QComboBox;
-class QLineEdit;
-class QCheckBox;
-class PlotWidget;
-class QPlainTextEdit;
-
-struct Telemetry {
-    double altitude = 0.0, temperature = 25.0, pressure = 1013.25;
-    double battery = 100.0, velocity = 0.0, latitude = 0.0, longitude = 0.0;
-    double ax = 0.0, ay = 0.0, az = 9.81;
-    QString status = "READY";
-};
+class QSerialPort;
 
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
 public:
     explicit MainWindow(QWidget *parent = nullptr);
-    ~MainWindow() override;
+    ~MainWindow();
+
 private slots:
-    void updateSimulation();
-    void readSerial();
-    void connectSerial();
-    void disconnectSerial();
-    void startLogging();
-    void stopLogging();
-    void exportCsv();
+    void updateTelemetry();
+    void manualLand();
+    void resetSimulation();
+    void toggleLogging();
     void startSimulation();
     void stopSimulation();
-    void simulatedManualLand();
-    void simulatedAutoLand();
-    void resetSimulation();
-    void navigate(int page);
+    void toggleManualMode();
+    void refreshSerialPorts();
+    void connectArduino();
+    void disconnectArduino();
+    void readArduinoData();
+    void processArduinoLine(const QByteArray &line);
+
 private:
-    QWidget *buildHomePage();
-    QWidget *buildTelemetryPage();
-    QWidget *buildLoggingPage();
-    QWidget *buildSensorsPage();
-    QWidget *buildLandingPage(bool automatic);
-    QWidget *buildSettingsPage();
-    QWidget *makeCard(const QString &title, QLabel **value, const QString &unit);
-    QPushButton *makeNavButton(const QString &text, int page);
-    void applyStyle();
-    void refreshUi();
-    void updateSensorTable();
+    QTimer *timer;
+    QFile *logFile;
+    QLabel *altitudeValue, *temperatureValue, *batteryValue, *statusValue;
+    QLabel *velocityValue, *connectionValue, *systemState, *visualAltitudeValue;
+    QLabel *pressureValue, *gpsValue, *accelValue, *logState;
+    QPushButton *startButton, *stopButton, *landButton, *manualButton, *resetButton, *logButton;
+    QTableWidget *logTable;
+    QSerialPort *serialPort;
+    QComboBox *portCombo;
+    QComboBox *baudCombo;
+    QLabel *serialStatusLabel;
+    QByteArray serialBuffer;
+    bool hardwareMode;
+    double latitude, longitude, accelX, accelY, accelZ;
+    QStackedWidget *pageStack;
+    QVector<QPushButton*> navigationButtons;
+    QWidget *chartWidget;
+    QWidget *rocketWidget;
+    QProgressBar *batteryBar;
+    double altitude, temperature, battery, velocity, pressure;
+    int elapsedSeconds;
+    bool landed, paused, manualMode, loggingEnabled;
+    QVector<double> altitudeHistory;
+
+    QWidget *makeCard(const QString &title, QLabel **valueLabel, const QString &accent);
+    void updateDashboard();
     void appendLogRow();
-    void parseTelemetryLine(const QByteArray &line);
-    void setNotice(const QString &message);
-    QString csvHeader() const;
-    QString csvRow() const;
-
-    Telemetry m_data;
-    QSerialPort m_serial;
-    QTimer m_simTimer;
-    QTimer m_clockTimer;
-    bool m_simulation = true;
-    bool m_logging = false;
-    QFile m_logFile;
-    QString m_logPath;
-    double m_simTime = 0.0;
-    QVector<double> m_altHistory, m_tempHistory;
-
-    QStackedWidget *m_pages = nullptr;
-    QLabel *m_connectionLabel = nullptr;
-    QLabel *m_clockLabel = nullptr;
-    QLabel *m_altValue = nullptr, *m_tempValue = nullptr, *m_batteryValue = nullptr;
-    QLabel *m_statusValue = nullptr, *m_velocityValue = nullptr, *m_notice = nullptr;
-    QLabel *m_modeLabel = nullptr;
-    PlotWidget *m_altPlot = nullptr, *m_telemetryPlot = nullptr;
-    QTableWidget *m_logTable = nullptr, *m_sensorTable = nullptr;
-    QComboBox *m_portCombo = nullptr, *m_baudCombo = nullptr, *m_modeCombo = nullptr;
-    QLineEdit *m_logPathEdit = nullptr;
-    QPushButton *m_startBtn = nullptr, *m_stopBtn = nullptr;
-    QPushButton *m_manualBtn = nullptr, *m_autoBtn = nullptr;
-    QPushButton *m_connectBtn = nullptr;
-    QPlainTextEdit *m_rawTelemetry = nullptr;
+    void writeCsvRow();
+    QPushButton *addNavigationItem(QVBoxLayout *layout, const QString &icon, const QString &label, bool active = false);
+    void showPage(int index);
 };
+
+#endif
