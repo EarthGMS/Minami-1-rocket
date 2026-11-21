@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>MainWindow</class>
+ <widget class="QMainWindow" name="MainWindow">
+  <property name="windowTitle"><string>Rocket Monitoring System</string></property>
+  <property name="minimumSize"><size><width>900</width><height>600</height></size></property>
+  <widget class="QWidget" name="centralwidget">
+   <layout class="QVBoxLayout" name="verticalLayout">
+    <item><widget class="QLabel" name="labelTitle"><property name="text"><string>ROCKET MONITORING SYSTEM</string></property><property name="alignment"><set>Qt::AlignCenter</set></property><property name="styleSheet"><string>font-size: 22pt; font-weight: bold; padding: 12px; color: #42c8f5;</string></property></widget></item>
+    <item><widget class="QLabel" name="labelStatus"><property name="text"><string>Status: STOPPED / READY</string></property></widget></item>
+    <item><layout class="QGridLayout" name="metricsLayout">
+     <item row="0" column="0"><widget class="QLabel" name="labelAltitude"><property name="text"><string>Altitude: 0.0 m</string></property><property name="minimumSize"><size><width>250</width><height>70</height></size></property><property name="alignment"><set>Qt::AlignCenter</set></property><property name="styleSheet"><string>background-color: #203244; color: white; font-size: 16pt;</string></property></widget></item>
+     <item row="0" column="1"><widget class="QLabel" name="labelSpeed"><property name="text"><string>Speed: 0.0 m/s</string></property><property name="minimumSize"><size><width>250</width><height>70</height></size></property><property name="alignment"><set>Qt::AlignCenter</set></property><property name="styleSheet"><string>background-color: #203244; color: white; font-size: 16pt;</string></property></widget></item>
+     <item row="1" column="0"><widget class="QLabel" name="labelTemperature"><property name="text"><string>Temperature: 25.0 C</string></property><property name="minimumSize"><size><width>250</width><height>70</height></size></property><property name="alignment"><set>Qt::AlignCenter</set></property><property name="styleSheet"><string>background-color: #203244; color: white; font-size: 16pt;</string></property></widget></item>
+     <item row="1" column="1"><widget class="QLabel" name="labelBattery"><property name="text"><string>Battery: 100.0 %</string></property><property name="minimumSize"><size><width>250</width><height>70</height></size></property><property name="alignment"><set>Qt::AlignCenter</set></property><property name="styleSheet"><string>background-color: #203244; color: white; font-size: 16pt;</string></property></widget></item>
+    </layout></item>
+    <item><layout class="QHBoxLayout" name="buttonsLayout">
+     <item><widget class="QPushButton" name="btnStart"><property name="text"><string>Start Simulation</string></property></widget></item>
+     <item><widget class="QPushButton" name="btnStop"><property name="text"><string>Stop Simulation</string></property></widget></item>
+     <item><widget class="QPushButton" name="btnLog"><property name="text"><string>Start CSV Logging</string></property></widget></item>
+     <item><widget class="QPushButton" name="btnLand"><property name="text"><string>Manual Land</string></property></widget></item>
+     <item><widget class="QPushButton" name="btnReset"><property name="text"><string>Reset</string></property></widget></item>
+    </layout></item>
+    <item><widget class="QLabel" name="labelHistory"><property name="text"><string>Telemetry History (simulated data)</string></property></widget></item>
+    <item><widget class="QTableWidget" name="tableWidget"><property name="rowCount"><number>0</number></property><property name="columnCount"><number>5</number></property></widget></item>
+    <item><widget class="QLabel" name="labelDisclaimer"><property name="text"><string>Demo only — simulated telemetry; does not control real hardware.</string></property><property name="alignment"><set>Qt::AlignCenter</set></property></widget></item>
+   </layout>
+  </widget>
+  <property name="styleSheet"><string>QMainWindow, QWidget { background-color: #111923; color: #e8f1f8; } QPushButton { background-color: #176b87; color: white; padding: 10px; border: none; border-radius: 5px; font-weight: bold; } QPushButton:hover { background-color: #2389a9; } QTableWidget { background-color: #182532; gridline-color: #405060; } QHeaderView::section { background-color: #203244; color: white; padding: 6px; }</string></property>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>
