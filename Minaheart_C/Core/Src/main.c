@@ -8,6 +8,10 @@
 #include "fatfs.h"
 #include <stdarg.h>
 #include "Functions/LoRa_functions.h"
+#include <math.h>
+
+#define SERVO_0_DEG     1000
+#define SERVO_270_DEG   2500
 
 I2C_HandleTypeDef hi2c2;
 
@@ -18,6 +22,142 @@ SPI_HandleTypeDef hspi3;
 TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
+
+volatile uint8_t bmi160_addr = 0;
+volatile uint8_t bmi160_chip_id = 0;
+volatile uint8_t init_status = 0;
+
+volatile int16_t gyro_raw[3] = {0};
+volatile int16_t accel_raw[3] = {0};
+volatile float gyro_dps[3] = {0.0f};
+volatile float accel_g[3] = {0.0f};
+
+volatile double altitude;
+
+// ค่าหลังกรองสัญญาณและมุมเอียงของจรวด (ดูใน Live Expressions)
+volatile float accel_lpf[3] = {0.0f, 0.0f, 1.0f};
+float gyro_offset[3] = {0.0f, 0.0f, 0.0f};
+volatile float roll_deg = 0.0f;   // มุมเอียงแกน Roll (องศา)
+volatile float pitch_deg = 0.0f;  // มุมเอียงแกน Pitch (องศา)
+volatile float tilt_deg = 0.0f;   // มุมเอียงรวมจากแนวดิ่ง (0 องศา = ตั้งตรง)
+uint32_t last_tick = 0;
+char live_text[64] = "Waiting...";
+
+// ฟังก์ชันช่วยเขียนค่าลงรีจิสเตอร์ BMI160
+static HAL_StatusTypeDef BMI160_WriteReg(uint8_t reg, uint8_t val) {
+    return HAL_I2C_Mem_Write(&hi2c2, bmi160_addr, reg, 1, &val, 1, 100);
+}
+
+void Servo_SetPulse(uint16_t pulse_us)
+{
+    __HAL_TIM_SET_COMPARE(&htim2,
+                          TIM_CHANNEL_1,
+                          pulse_us);
+}
+
+void BMI160_Init(void) {
+    uint8_t id = 0;
+
+    if (HAL_I2C_IsDeviceReady(&hi2c2, (0x68 << 1), 3, 100) == HAL_OK) {
+        bmi160_addr = (0x68 << 1);
+    } else if (HAL_I2C_IsDeviceReady(&hi2c2, (0x69 << 1), 3, 100) == HAL_OK) {
+        bmi160_addr = (0x69 << 1);
+    } else {
+        init_status = 0;
+        return;
+    }
+
+    if (HAL_I2C_Mem_Read(&hi2c2, bmi160_addr, 0x00, 1, &id, 1, 100) == HAL_OK && id == 0xD1) {
+        bmi160_chip_id = id;
+
+        // 1. Soft Reset
+        BMI160_WriteReg(0x7E, 0xB6);
+        HAL_Delay(50);
+
+        // 2. เปิด Accelerometer (Normal Mode) และ Gyroscope (Normal Mode)
+        BMI160_WriteReg(0x7E, 0x11);
+        HAL_Delay(10);
+        BMI160_WriteReg(0x7E, 0x15);
+        HAL_Delay(80);
+
+        // 3. ตั้งค่ารีจิสเตอร์ความเร่ง: OSR4 Filter + 200Hz (0x09), ย่านวัด ±8g (0x08)
+        BMI160_WriteReg(0x40, 0x28);
+        BMI160_WriteReg(0x41, 0x05);
+
+        // 4. ตั้งค่ารีจิสเตอร์ไจโร: OSR4 Filter + 200Hz (0x09), ย่านวัด ±500 dps (0x02)
+        BMI160_WriteReg(0x42, 0x028);
+        BMI160_WriteReg(0x43, 0x03);
+        HAL_Delay(20);
+
+        // 5. คาริเบรตหาค่า Offset ไจโร 200 ครั้ง (วางจรวดนิ่งๆ ตอนเปิดเครื่อง ~0.6 วินาที)
+        float sum_gx = 0.0f, sum_gy = 0.0f, sum_gz = 0.0f;
+        uint8_t buf[6];
+        int valid_samples = 0;
+        for (int i = 0; i < 100; i++) {
+                    if (HAL_I2C_Mem_Read(&hi2c2, bmi160_addr, 0x0C, 1, buf, 6, 100) == HAL_OK) {
+                        sum_gx += (int16_t)((buf[1] << 8) | buf[0]) / 131.2f;
+                        sum_gy += (int16_t)((buf[3] << 8) | buf[2]) / 131.2f;
+                        sum_gz += (int16_t)((buf[5] << 8) | buf[4]) / 131.2f;
+                        valid_samples++;
+                    }
+                    HAL_Delay(10);
+        }
+        if (valid_samples > 0) {
+                    gyro_offset[0] = sum_gx / (float)valid_samples;
+                    gyro_offset[1] = sum_gy / (float)valid_samples;
+                    gyro_offset[2] = sum_gz / (float)valid_samples;
+                }
+
+                last_tick = HAL_GetTick();
+                init_status = 1;
+            } else {
+                init_status = 0;
+            }
+        }
+
+void BMI160_Read_And_Update_Angle(void) {
+    uint8_t raw_buf[12];
+    if (HAL_I2C_Mem_Read(&hi2c2, bmi160_addr, 0x0C, 1, raw_buf, 12, 100) != HAL_OK) {
+        return;
+    }
+
+    // คำนวณเวลา dt (วินาที)
+    uint32_t now = HAL_GetTick();
+    float dt = (now - last_tick) / 1000.0f;
+    if (dt <= 0.0f || dt > 0.5f) dt = 0.01f;
+    last_tick = now;
+
+    // แปลงข้อมูลดิบ 16 บิต
+    gyro_raw[0]  = (int16_t)((raw_buf[1] << 8) | raw_buf[0]);
+    gyro_raw[1]  = (int16_t)((raw_buf[3] << 8) | raw_buf[2]);
+    gyro_raw[2]  = (int16_t)((raw_buf[5] << 8) | raw_buf[4]);
+
+    accel_raw[0] = (int16_t)((raw_buf[7] << 8) | raw_buf[6]);
+    accel_raw[1] = (int16_t)((raw_buf[9] << 8) | raw_buf[8]);
+    accel_raw[2] = (int16_t)((raw_buf[11] << 8) | raw_buf[10]);
+
+    // แปลงหน่วยตามรีจิสเตอร์ที่ตั้งไว้ (±500 dps -> 65.6, ±8g -> 4096.0) พร้อมหัก Offset ไจโร
+    for (int i = 0; i < 3; i++) {
+            gyro_dps[i]  = (gyro_raw[i] / 131.2f) - gyro_offset[i];
+            accel_g[i]   = accel_raw[i] / 8192.0f;
+            // กรองความถี่ต่ำ (Low-Pass Filter) ให้ค่าความเร่งนิ่งขึ้น
+            accel_lpf[i] = (0.80f * accel_lpf[i]) + (0.20f * accel_g[i]);
+        }
+
+    // คำนวณมุม Roll และ Pitch จากความเร่ง (หน่วยองศา)
+    float acc_roll  = atan2f(accel_lpf[1], accel_lpf[2]) * 57.29578f;
+    float acc_pitch = atan2f(-accel_lpf[0], sqrtf(accel_lpf[1] * accel_lpf[1] + accel_lpf[2] * accel_lpf[2])) * 57.29578f;
+
+    // Complementary Filter: เชื่อไจโร 96% + เชื่อความเร่ง 4% (ลดผลกระทบขณะจรวดเร่งความเร็ว)
+    roll_deg  = 0.96f * (roll_deg  + gyro_dps[0] * dt) + 0.04f * acc_roll;
+    pitch_deg = 0.96f * (pitch_deg + gyro_dps[1] * dt) + 0.04f * acc_pitch;
+
+    // คำนวณมุมเอียงรวมจากแนวดิ่ง (0 องศา = ตั้งฉากกับพื้น)
+    float cos_tilt = cosf(roll_deg * 0.0174533f) * cosf(pitch_deg * 0.0174533f);
+    if (cos_tilt > 1.0f) cos_tilt = 1.0f;
+    if (cos_tilt < -1.0f) cos_tilt = -1.0f;
+    tilt_deg = acosf(cos_tilt) * 57.29578f;
+}
 
 /* USER CODE BEGIN PV */
 void myprintf(const char *fmt, ...);
@@ -34,10 +174,28 @@ void myprintf(const char *fmt, ...) {
 
 }
 
+/* Added or edited by ChatGPT: one servo on PA0 / TIM2_CH1. */
+
+static void Servo1_SetServoAngle(TIM_HandleTypeDef *htim, uint32_t channel, uint8_t angle)
+{
+	uint32_t pulse_length =  180 +  (angle * (899-180)/180);
+	__HAL_TIM_SET_COMPARE(&htim2,TIM_CHANNEL_1,pulse_length);
+}
+
+
+/* Added or edited by ChatGPT: end single-servo functions. */
+
 char buffer_main[64];
 uint8_t writeBuf[512];
 uint8_t readBuf[512];
 uint8_t message[512];
+/* Added or edited by ChatGPT */
+volatile int leg1 = 0;
+volatile int leg2 = 0;
+volatile int leg3 = 0;
+volatile int leg4 = 0;
+
+double initialPressure;
 
 
 void SystemClock_Config(void);
@@ -66,6 +224,12 @@ int main(void)
   MX_SPI3_Init();
   MX_TIM2_Init();
 
+ uint32_t last_display_tick = 0;
+
+  //Servo1_RunTest(); /* Does not return. */
+
+  /*
+
   //LoRa initialization (wait for test)
   myprintf("\r\n[LoRa] Starting SPI3\r\n");
   HAL_GPIO_WritePin(LoRa_CS_GPIO_Port, LoRa_CS_Pin, GPIO_PIN_SET);
@@ -79,7 +243,7 @@ int main(void)
   }
   uint8_t payload[255];
   uint8_t length;
-  LoRa_StartReceive();
+  LoRa_StartReceive();// */
 
   //BMI160 initialization
 
@@ -91,7 +255,7 @@ int main(void)
   bmp580_write_reg(0x36, 0x7B, &hspi1); 		// Enable pressure, OSR pressure x128, OSR temperature x8
   bmp580_write_reg(0x37, 0x03, &hspi1); 		// Run in continuous sampling mode
   HAL_Delay(10);
-  double initialPressure = BMP580_readPressure(hspi1); //Setup the start pressure for starting altitude
+  initialPressure = BMP580_readPressure(hspi1); //Setup the start pressure for starting altitude
 
   //MicroSD initialization
 
@@ -100,24 +264,61 @@ int main(void)
   snprintf(buffer_main, sizeof(buffer_main), "-----------------------MINAHEART FLIGHT COMPUTER-----------------------\n");
   HAL_UART_Transmit(&huart1, (uint8_t*)buffer_main, sizeof(buffer_main), 100);
 
+  /* Added or edited by ChatGPT */
+
+  HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_1);
+
+
+  // Test counterclockwise rotation
+
   while (1)
   {
-	  //Polling for data from groud station (wait for test)
-	  LoRa_receiveConfigData();
 
+	  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 1250U);
+	  HAL_Delay(5000);
+	  leg1 = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_14);
+	  leg2 = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_15);
+	  leg3 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11);
+	  leg4 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_12);
+
+	  //BMI160 test
+	  if (init_status == 1) {
+	          BMI160_Read_And_Update_Angle();
+	          if (HAL_GetTick() - last_display_tick >= 500) {
+	              last_display_tick = HAL_GetTick();
+	              snprintf(live_text, sizeof(live_text), "R:%.2f P:%.2f Tilt:%.2f deg",
+	                       roll_deg, pitch_deg, tilt_deg);
+	              HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+	          }
+	          HAL_Delay(10); // อ่านค่าและคำนวณมุม ~100 Hz
+	      } else {
+	          BMI160_Init();
+	          HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_13);
+	          HAL_Delay(500);
+	      }
+	    }
+	    /* USER CODE END 3 */
+
+	  //Polling for data from groud station (wait for test)
+	  /*LoRa_receiveConfigData();
+	*/
 	  //Polling for height (wait for test)
 	  double rawPressure = BMP580_readPressure(hspi1);	// 1. Read the raw pressure
-	  double altitude = pressure_to_altitude(rawPressure, initialPressure); // 2. Calculate raw altitude into altitude
+	  altitude = pressure_to_altitude(rawPressure, initialPressure); // 2. Calculate raw altitude into altitude
+	  snprintf(live_text, sizeof(live_text), "Altitude:%.2f m",
+	  	                       altitude);
 
+	  //double mockupalt = 0.3;
 	  //Calculate an angle for rotation (wait for test)
-	  int ang = 1.35*(altitude*100);
-	  int pulse = 1000 + (ang/180)*1000;
-	  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, pulse); //set servos using the same PWM
+	  //int ang = 1.35*(altitude*100);
+	 // int pulse = 1000 + (ang/180)*1000;
+	  //__HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_1, 1500UL); //set servos using the same PWM
 
 	  //Send data via LoRa
-	  snprintf((char *)message, sizeof(message), "LoRa test");
-	  LoRa_Send(message, sizeof(message) - 1U, 1000U);
+	  //snprintf((char *)message, sizeof(message), "LoRa test");
+	  //LoRa_Send(message, sizeof(message) - 1U, 1000U);
 
+	  /*
 	  //Check if height is less than 0.5 m, enter the landing check
 	  if(altitude > 0.5){
 		  return 0;
@@ -133,10 +334,10 @@ int main(void)
 			  snprintf((char *)message, sizeof(message), "Mission fails");
 			  LoRa_Send(message, sizeof(message) - 1U, 1000U);
 		  }
-	  }
-  }
-
+	  }*/
 }
+
+
 
 /**
   * @brief System Clock Configuration
@@ -155,13 +356,12 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 72;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLM = 12;
+  RCC_OscInitStruct.PLL.PLLN = 96;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
   RCC_OscInitStruct.PLL.PLLQ = 4;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
@@ -178,7 +378,7 @@ void SystemClock_Config(void)
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV2;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV1;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_2) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_3) != HAL_OK)
   {
     Error_Handler();
   }
@@ -352,9 +552,9 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 83;
+  htim2.Init.Prescaler = 5647;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim2.Init.Period = 19999;
+  htim2.Init.Period = 7199;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
   htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
@@ -450,6 +650,7 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
+  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
 
@@ -472,7 +673,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pins : LS_1_Pin LS_2_Pin */
   GPIO_InitStruct.Pin = LS_1_Pin|LS_2_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 
   /*Configure GPIO pin : BMP580_CS_Pin */
@@ -498,7 +699,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pins : LS_3_Pin LS_4_Pin */
   GPIO_InitStruct.Pin = LS_3_Pin|LS_4_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLUP;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /* USER CODE BEGIN MX_GPIO_Init_2 */
