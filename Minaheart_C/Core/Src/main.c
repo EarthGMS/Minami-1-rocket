@@ -275,7 +275,7 @@ int main(void)
   {
 
 	  __HAL_TIM_SET_COMPARE(&htim2, TIM_CHANNEL_2, 1250U);
-	  HAL_Delay(5000);
+	 Servo1_SetServoAngle(&htim2, TIM_CHANNEL_1, 150);
 	  leg1 = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_14);
 	  leg2 = HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_15);
 	  leg3 = HAL_GPIO_ReadPin(GPIOA, GPIO_PIN_11);
@@ -552,7 +552,7 @@ static void MX_TIM2_Init(void)
 
   /* USER CODE END TIM2_Init 1 */
   htim2.Instance = TIM2;
-  htim2.Init.Prescaler = 5647;
+  htim2.Init.Prescaler = 200;
   htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
   htim2.Init.Period = 7199;
   htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
